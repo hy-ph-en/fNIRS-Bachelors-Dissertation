@@ -1,4 +1,6 @@
 import itertools
+from re import X
+from turtle import xcor
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -18,6 +20,7 @@ from sklearn.model_selection import (StratifiedKFold, GroupKFold,
 from sklearn.svm import LinearSVC
 from sklearn.utils import shuffle
 from kmeans_pytorch import kmeans, kmeans_predict
+from sklearn.model_selection import train_test_split
 
 OUTER_K = 5
 INNER_K = 5
@@ -568,11 +571,14 @@ def deep_learn(nirs, labels, groups, n_classes, model, features=None,
     for k, out_idx in enumerate(out_split):
         print(f'\tFOLD #{k+1}')
         
+        #print(out_idx)
+        #print("################")
+        #print(out_idx[0])
         nirs_train, nirs_test = nirs[out_idx[0]], nirs[out_idx[1]]
         labels_train, labels_test = labels[out_idx[0]], labels[out_idx[1]]
 
+        #print(labels[out_idx[0]])
         print(nirs_train)
-        
         if groups is None:
             groups_train = None
             if train_size == 1.:
@@ -688,10 +694,10 @@ def deep_learn(nirs, labels, groups, n_classes, model, features=None,
     #wont import labels 
     
     #groups, n_classes, model, features=None, normalize=False, train_size=1., out_path='./'
-def k_means(nirs):
+def k_means(nirs,labels,groups):   #imports labels for comparison 
     
     #variables
-    num_clusters = 3 #num_clusters has to be changed later to be self improving, most likely using 
+    num_clusters = 2 #num_clusters has to be changed later to be self improving, most likely using 
     
     # set device
     if torch.cuda.is_available():
@@ -699,14 +705,28 @@ def k_means(nirs):
     else:
         device = torch.device('cpu')
     
-    nirs_train, nirs_test = nirs[0], nirs[1]
-    print(nirs_train[1])
+    #np.arange(300).reshape((100, 3)), range(5)
+    
+    nirs_train, nirs_test, y_train, y_test = train_test_split(nirs, labels, train_size=0.80, random_state=42) #stuffles automatically
+    
     x = torch.from_numpy(nirs_train)
+    print(x)
+    
     cluster_ids_x, cluster_centers = kmeans(x, num_clusters=num_clusters, distance='euclidean', device=torch.device('cuda:0'))
     
     y = torch.from_numpy(nirs_test)
     cluster_ids_y = kmeans_predict(y, cluster_centers, 'euclidean', device=device)
     
+    
+    
+    
+    #x = torch.sparse.torch.eye(10).index_select(dim=0, index=x.long().flatten())
+    
+    
+    
+    
+    
+    #Graphing
     plt.figure(figsize=(4, 3), dpi=160)
     plt.scatter(x[:, 0], x[:, 1], c=cluster_ids_x, cmap='cool')
     plt.scatter(y[:, 0], y[:, 1], c=cluster_ids_y, cmap='cool', marker='X')
@@ -724,3 +744,4 @@ def k_means(nirs):
     plt.show()
     
     return cluster_ids_x, cluster_centers, cluster_ids_y #accuracies, all_hps, additional_metrics
+
