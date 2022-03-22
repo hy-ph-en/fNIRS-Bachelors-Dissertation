@@ -8,6 +8,8 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import tensorflow as tf
+import math
 
 from pandas import DataFrame
 from torch.utils.data import DataLoader, Dataset
@@ -20,7 +22,9 @@ from sklearn.model_selection import (StratifiedKFold, GroupKFold,
 from sklearn.svm import LinearSVC
 from sklearn.utils import shuffle
 from kmeans_pytorch import kmeans, kmeans_predict
+from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import silhouette_score
 
 OUTER_K = 5
 INNER_K = 5
@@ -577,7 +581,7 @@ def deep_learn(nirs, labels, groups, n_classes, model, features=None,
         nirs_train, nirs_test = nirs[out_idx[0]], nirs[out_idx[1]]
         labels_train, labels_test = labels[out_idx[0]], labels[out_idx[1]]
 
-        #print(labels[out_idx[0]])
+        print(labels[out_idx[0]])
         print(nirs_train)
         if groups is None:
             groups_train = None
@@ -697,7 +701,15 @@ def deep_learn(nirs, labels, groups, n_classes, model, features=None,
 def k_means(nirs,labels,groups):   #imports labels for comparison 
     
     #variables
-    num_clusters = 2 #num_clusters has to be changed later to be self improving, most likely using 
+    sse = []
+    sil = []
+    both_condition = False
+    k_best = []
+    #settings
+    k_max = 10                  #num_clusters has to be changed later to be self improving, most likely using
+    wss_setting = True          #If it should use wss
+    silhouette_setting = True   #If it should use silhouette
+    cut_off = 1.5               #Point at which the drop in wss performance means that it should stop
     
     # set device
     if torch.cuda.is_available():
@@ -707,17 +719,78 @@ def k_means(nirs,labels,groups):   #imports labels for comparison
     
     #np.arange(300).reshape((100, 3)), range(5)
     
-    nirs_train, nirs_test, y_train, y_test = train_test_split(nirs, labels, train_size=0.80, random_state=42) #stuffles automatically
-    
+    x, toss, y_train, y_test = train_test_split(nirs, labels, train_size=0.10, random_state=42) #stuffles automatically
+    nirs_train, nirs_test, y_train, y_test = train_test_split(x, y_train, train_size=0.80, random_state=42)
+    print(nirs_train)
     x = torch.from_numpy(nirs_train)
     print(x)
-    
-    cluster_ids_x, cluster_centers = kmeans(x, num_clusters=num_clusters, distance='euclidean', device=torch.device('cuda:0'))
-    
     y = torch.from_numpy(nirs_test)
-    cluster_ids_y = kmeans_predict(y, cluster_centers, 'euclidean', device=device)
     
+    #removes break condition 
+    if silhouette_setting == False:
+        wss_setting = False
+        print("wss set to default true due to silhouette being False")
     
+    #Finding optimal k - WSS
+    for num_clusters in range(1, k_max+1):      #goes through all the k values 
+        
+        #later make the distance type costimisable 
+        nsamples, nx, ny = x.shape
+        print()
+        kmeans = KMeans(n_clusters=num_clusters, random_state=0).fit((nsamples,nx*ny))
+        
+        cluster_ids_x, cluster_centers = kmeans(x, num_clusters=num_clusters, distance='euclidean', device=torch.device('cuda:0'))
+        cluster_ids_y = kmeans_predict(y, cluster_centers, 'euclidean', device=device)
+        print(cluster_ids_x)
+        
+        #Finding optimal k - WSS
+        if(wss_setting):
+            for i in range(num_clusters):      #goes through all the clusters
+                wss = 0
+                #issue with how this assumes it is a 2d array, see current issue sheet, maybe a eculidean distance calculator function is desirable
+                for x in range(len(cluster_ids_x[i, :])):
+                    current_id = cluster_ids_x[i, x]        #i is the cluster value, x is the point in that cluster
+                    wss += math.sqrt((cluster_centers[i:0] - current_id[0])**2 + (cluster_centers[i:1] - current_id[1])**2) #calcualting the difference in distance
+                    
+                    
+                #can make a graph for the dis later using wss
+            sse.append(wss)
+            if num_clusters>=2:
+                wss_decrease_past = sse[i-1]/ sse[i-2]   #seeing if the decrease is still roughly at the same rate
+                wss_decrease_current = sse[i]/sse[i-1]
+                    
+                if(wss_decrease_past>(wss_decrease_current*cut_off)):   
+                    i = len(num_clusters)
+                    num_clusters = k_max+1
+                else:
+                    wss_setting = False                  #Stop condition
+                    
+        #Finding optimal k - Silhouette value
+        if(silhouette_setting):
+            #the data wont be organised correctly, print out the data to see how to reorganise it so it fits this
+            sil.append(silhouette_score(cluster_ids_x[:,:],cluster_ids_x[:],metric = 'euclidean'))
+            if(num_clusters>=2):
+                if(sil[num_clusters-2] > sil[num_clusters-1]):
+                    silhouette_setting = False           #Stop condition
+
+    #Process for what k's to use and what not too
+    k_best_wss = len(sse)-1
+    k_best_silhouette = sil[len(sil)-1]
+    if(len(sse) > 1 and len(sil)>1):
+        if(k_best_wss == k_best_silhouette):
+            k_best.append(k_best_wss)
+        else:
+            both_condition = True
+            k_best.append(k_best_wss)
+            k_best.append(k_best_silhouette)
+    else:
+        if(len(sse) > 1):
+            k_best.append(k_best_wss)
+        else:
+            k_best.append(k_best_silhouette)
+
+
+
     
     
     #x = torch.sparse.torch.eye(10).index_select(dim=0, index=x.long().flatten())
@@ -745,3 +818,5 @@ def k_means(nirs,labels,groups):   #imports labels for comparison
     
     return cluster_ids_x, cluster_centers, cluster_ids_y #accuracies, all_hps, additional_metrics
 
+def pca():
+    return 0
