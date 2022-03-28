@@ -1,6 +1,8 @@
+from asyncio.windows_events import NULL
 import itertools
 from re import X
 from turtle import xcor
+import xdrlib
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -25,6 +27,8 @@ from kmeans_pytorch import kmeans, kmeans_predict
 from sklearn.cluster import KMeans
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import silhouette_score
+from scipy.spatial import distance
+from numpy import zeros, newaxis
 
 OUTER_K = 5
 INNER_K = 5
@@ -581,8 +585,8 @@ def deep_learn(nirs, labels, groups, n_classes, model, features=None,
         nirs_train, nirs_test = nirs[out_idx[0]], nirs[out_idx[1]]
         labels_train, labels_test = labels[out_idx[0]], labels[out_idx[1]]
 
-        print(labels[out_idx[0]])
-        print(nirs_train)
+        #print(labels[out_idx[0]])
+        #print(nirs_train)
         if groups is None:
             groups_train = None
             if train_size == 1.:
@@ -698,100 +702,145 @@ def deep_learn(nirs, labels, groups, n_classes, model, features=None,
     #wont import labels 
     
     #groups, n_classes, model, features=None, normalize=False, train_size=1., out_path='./'
-def k_means(nirs,labels,groups):   #imports labels for comparison 
+def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_path):   #imports labels for comparison 
     
     #variables
     sse = []
     sil = []
     both_condition = False
     k_best = []
+    k_best_wss = NULL
+    k_best_silhouette = NULL
     #settings
     k_max = 10                  #num_clusters has to be changed later to be self improving, most likely using
     wss_setting = True          #If it should use wss
-    silhouette_setting = True   #If it should use silhouette
+    silhouette_setting = False   #If it should use silhouette - need to fix data it seems
     cut_off = 1.5               #Point at which the drop in wss performance means that it should stop
+    torch.set_printoptions(threshold=10_000)
     
     # set device
     if torch.cuda.is_available():
         device = torch.device('cuda:0')
     else:
         device = torch.device('cpu')
-    
-    #np.arange(300).reshape((100, 3)), range(5)
-    
-    x, toss, y_train, y_test = train_test_split(nirs, labels, train_size=0.10, random_state=42) #stuffles automatically
-    nirs_train, nirs_test, y_train, y_test = train_test_split(x, y_train, train_size=0.80, random_state=42)
-    print(nirs_train)
-    x = torch.from_numpy(nirs_train)
+        
+    x, toss, y_train, y_test = train_test_split(nirs, labels, train_size=0.10, random_state=42)             #just to make the datasize smaller
+    x, nirs_test, y_train, y_test = train_test_split(x, y_train, train_size=0.80, random_state=42)          #stuffles automatically
+
+
+    #Data Organisation
+    swap = np.array([np.transpose(x[0,:,:])])
+    i = 1
+    while i < x.shape[0]:
+        transfer = x[i,:,:]
+        transfer = np.transpose(transfer)
+        swap = np.append(swap, [transfer], axis=0)
+        i = i + 1
+    x = swap
     print(x)
-    y = torch.from_numpy(nirs_test)
     
+    swap = np.array([np.transpose(nirs_test[0,:,:])])
+    i = 1
+    while i < nirs_test.shape[0]:
+        transfer = nirs_test[i,:,:]
+        transfer = np.transpose(transfer)
+        swap = np.append(swap, [transfer], axis=0)
+        i = i + 1
+    y = swap
+
+    x = torch.from_numpy(x)
+    y = torch.from_numpy(y)
+
+    #y = y.reshape(y.shape[0]*y.shape[1]*y.shape[2])
+
     #removes break condition 
     if silhouette_setting == False:
-        wss_setting = False
+        wss_setting = True
         print("wss set to default true due to silhouette being False")
     
     #Finding optimal k - WSS
-    for num_clusters in range(1, k_max+1):      #goes through all the k values 
-        
-        #later make the distance type costimisable 
-        nsamples, nx, ny = x.shape
-        print()
-        kmeans = KMeans(n_clusters=num_clusters, random_state=0).fit((nsamples,nx*ny))
-        
-        cluster_ids_x, cluster_centers = kmeans(x, num_clusters=num_clusters, distance='euclidean', device=torch.device('cuda:0'))
-        cluster_ids_y = kmeans_predict(y, cluster_centers, 'euclidean', device=device)
-        print(cluster_ids_x)
-        
-        #Finding optimal k - WSS
-        if(wss_setting):
-            for i in range(num_clusters):      #goes through all the clusters
-                wss = 0
-                #issue with how this assumes it is a 2d array, see current issue sheet, maybe a eculidean distance calculator function is desirable
-                for x in range(len(cluster_ids_x[i, :])):
-                    current_id = cluster_ids_x[i, x]        #i is the cluster value, x is the point in that cluster
-                    wss += math.sqrt((cluster_centers[i:0] - current_id[0])**2 + (cluster_centers[i:1] - current_id[1])**2) #calcualting the difference in distance
+    for example in range(x.shape[0]):               #Currently the number of examples are reduced
+        for num_clusters in range(2, k_max+1):      #goes through all the k values 
+            if(wss_setting == False and silhouette_setting == False):
+                print("Early Stop")
+                break
+            #later make the distance type costimisable 
+            
+            
+            #cluster_ids_x, cluster_centers = kmeans(x[example,:,:], num_clusters=num_clusters, distance='euclidean', device=torch.device('cuda:0'))
+            print(cluster_ids_x)
+            
+            #Finding optimal k - WSS
+            if(wss_setting):
+                for i in range(num_clusters):
+                    wss = 0
                     
-                    
-                #can make a graph for the dis later using wss
-            sse.append(wss)
-            if num_clusters>=2:
-                wss_decrease_past = sse[i-1]/ sse[i-2]   #seeing if the decrease is still roughly at the same rate
-                wss_decrease_current = sse[i]/sse[i-1]
-                    
-                if(wss_decrease_past>(wss_decrease_current*cut_off)):   
-                    i = len(num_clusters)
-                    num_clusters = k_max+1
+                    for count in range(len(x)):
+                        current_id = cluster_ids_x[count]        #i is the cluster value, x is the point in that cluster
+                        wss += distance.euclidean(cluster_centers[current_id], x[example,count,:])
+
+                    #can make a graph for the dis later using wss
+                sse.append(wss)
+                if num_clusters>4:
+                    print(len(sse))
+                    print(num_clusters)         #this doesnt work either as then you are just the same sse for all
+                    wss_decrease_past = sse[num_clusters-3]/ sse[num_clusters-4]   #seeing if the decrease is still roughly at the same rate
+                    wss_decrease_current = sse[num_clusters-2]/sse[num_clusters-3]
+                        
+                    if(wss_decrease_past>(wss_decrease_current*cut_off)):   
+                        k_best_wss = num_clusters-3          #issue point
+                        wss_setting = False                  #Stop condition
+                        
+            #Finding optimal k - Silhouette value
+            if(silhouette_setting):
+                #the current label structure of cluster_ids_x wont match x 
+                sil.append(silhouette_score(x[example,:,:],cluster_ids_x,metric = 'euclidean'))
+                if(num_clusters>3):
+                    if(sil[num_clusters-3] > sil[num_clusters-2]):
+                        silhouette_setting = False           #Stop condition
+                        k_best_silhouette = sil[len(sil)-1]
+                         
+        #Process for what k's to use and what not too
+        if(len(sse) >= 1 and len(sil)>=1):
+            wss_setting = True
+            silhouette_setting = True
+            if(k_best_wss == k_best_silhouette):
+                k_best.append(k_best_wss)
+            else:
+                if(choosen_learn == 'deep_learn'):      #need to record the two cluster ids in an array, do after the break condition
+                    accuracy_elbow, hps_elbow, metrics_elbow = deep_learn(x[example,:,:], cluster_ids_x, groups, classes, model, features, out_path)
+                    accuracy_silhouette,hps_silhouette, metrics_silhouette = deep_learn(x[example,:,:], cluster_ids_x, groups, classes, model, features, out_path)
                 else:
-                    wss_setting = False                  #Stop condition
-                    
-        #Finding optimal k - Silhouette value
-        if(silhouette_setting):
-            #the data wont be organised correctly, print out the data to see how to reorganise it so it fits this
-            sil.append(silhouette_score(cluster_ids_x[:,:],cluster_ids_x[:],metric = 'euclidean'))
-            if(num_clusters>=2):
-                if(sil[num_clusters-2] > sil[num_clusters-1]):
-                    silhouette_setting = False           #Stop condition
-
-    #Process for what k's to use and what not too
-    k_best_wss = len(sse)-1
-    k_best_silhouette = sil[len(sil)-1]
-    if(len(sse) > 1 and len(sil)>1):
-        if(k_best_wss == k_best_silhouette):
-            k_best.append(k_best_wss)
+                    accuracy_elbow, hps_elbow, metrics_elbow = machine_learn()
+                    accuracy_silhouette,hps_silhouette, metrics_silhouette = machine_learn()
+                
+                if(accuracy_elbow > accuracy_silhouette):
+                    k_best.append(k_best_wss)
+                else:
+                    k_best.append(k_best_silhouette)
         else:
-            both_condition = True
-            k_best.append(k_best_wss)
-            k_best.append(k_best_silhouette)
-    else:
-        if(len(sse) > 1):
-            k_best.append(k_best_wss)
-        else:
-            k_best.append(k_best_silhouette)
-
-
-
+            if(len(sse) >= 1):
+                wss_setting = True
+                k_best.append(k_best_wss)
+            else:
+                silhouette_setting = True
+                k_best.append(k_best_silhouette)
+        #Variable reset 
+        sse = []
+        sil = []
+        
+    print(k_best)
+    print(sum(k_best))
+    print(len(k_best))
+    k_value = round(sum(k_best)/len(k_best))    #finds best average k accross the datasets
+    print("best k")
+    print(k_value)
     
+    
+
+
+
+    #cluster_ids_y = kmeans_predict(y[example,:,:], cluster_centers, 'euclidean', device=device)
     
     #x = torch.sparse.torch.eye(10).index_select(dim=0, index=x.long().flatten())
     
