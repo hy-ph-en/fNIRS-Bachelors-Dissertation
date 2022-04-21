@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 import tensorflow as tf
 import math
+import statistics
 
 from pandas import DataFrame
 from torch.utils.data import DataLoader, Dataset
@@ -29,6 +30,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.metrics import silhouette_score
 from scipy.spatial import distance
 from numpy import zeros, newaxis
+from statistics import mode
+
 
 OUTER_K = 5
 INNER_K = 5
@@ -703,19 +706,22 @@ def deep_learn(nirs, labels, groups, n_classes, model, features=None,
     
     #groups, n_classes, model, features=None, normalize=False, train_size=1., out_path='./'
 def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_path):   #imports labels for comparison 
-    
     #variables
     sse = []
     sil = []
     both_condition = False
     k_best = []
-    k_best_wss = NULL
+    k_best_wss = 3
     k_best_silhouette = NULL
+    
+    
     #settings
     k_max = 10                  #num_clusters has to be changed later to be self improving, most likely using
     wss_setting = True          #If it should use wss
-    silhouette_setting = False   #If it should use silhouette - need to fix data it seems
-    cut_off = 1.5               #Point at which the drop in wss performance means that it should stop
+    silhouette_setting = False  #If it should use silhouette - need to fix data it seems
+    cut_off = 1.1                 #Point at which the drop in wss performance means that it should stop
+    Mode = True
+    Mean = False
     torch.set_printoptions(threshold=10_000)
     
     # set device
@@ -723,11 +729,20 @@ def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_pat
         device = torch.device('cuda:0')
     else:
         device = torch.device('cpu')
-        
-    x, toss, y_train, y_test = train_test_split(nirs, labels, train_size=0.10, random_state=42)             #just to make the datasize smaller
-    x, nirs_test, y_train, y_test = train_test_split(x, y_train, train_size=0.80, random_state=42)          #stuffles automatically
-
-
+    #removes break condition 
+    if Mode == True and Mean == True:
+        print("Mode set to Default: Mean set to False")
+        Mean = False
+    if silhouette_setting == False:
+        wss_setting = True
+        print("wss set to default true due to silhouette being False")
+    
+    #Test Splitting
+    x, nirs_test, y_train, y_test = train_test_split(nirs, labels, train_size=0.03, random_state=42)            #just to make the datasize smaller
+    x, nirs_test, groups, y_test = train_test_split(nirs, groups, train_size=0.03, random_state=42)             #getting the groups
+    keep_x = x
+    keep_y = y_train
+    print(x)
     #Data Organisation
     swap = np.array([np.transpose(x[0,:,:])])
     i = 1
@@ -737,7 +752,6 @@ def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_pat
         swap = np.append(swap, [transfer], axis=0)
         i = i + 1
     x = swap
-    print(x)
     
     swap = np.array([np.transpose(nirs_test[0,:,:])])
     i = 1
@@ -747,17 +761,15 @@ def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_pat
         swap = np.append(swap, [transfer], axis=0)
         i = i + 1
     y = swap
-
+    
+    old_x = torch.from_numpy(x)
+    for i in range(x.shape[0]):        #Data shuffle - Gives accurate k value
+        np.random.shuffle(x[i,:,:])
+    l = x
+    print(x)
     x = torch.from_numpy(x)
     y = torch.from_numpy(y)
 
-    #y = y.reshape(y.shape[0]*y.shape[1]*y.shape[2])
-
-    #removes break condition 
-    if silhouette_setting == False:
-        wss_setting = True
-        print("wss set to default true due to silhouette being False")
-    
     #Finding optimal k - WSS
     for example in range(x.shape[0]):               #Currently the number of examples are reduced
         for num_clusters in range(2, k_max+1):      #goes through all the k values 
@@ -766,58 +778,64 @@ def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_pat
                 break
             #later make the distance type costimisable 
             
-            
-            #cluster_ids_x, cluster_centers = kmeans(x[example,:,:], num_clusters=num_clusters, distance='euclidean', device=torch.device('cuda:0'))
-            print(cluster_ids_x)
-            
+            wss = 0
+            cluster_ids_x, cluster_centers = kmeans(x[example,:,:], num_clusters=num_clusters, distance='euclidean', device=device)
+
             #Finding optimal k - WSS
             if(wss_setting):
-                for i in range(num_clusters):
-                    wss = 0
-                    
-                    for count in range(len(x)):
-                        current_id = cluster_ids_x[count]        #i is the cluster value, x is the point in that cluster
-                        wss += distance.euclidean(cluster_centers[current_id], x[example,count,:])
+                for count in range(x.shape[1]):
+                    current_id = cluster_ids_x[count]        #i is the cluster value, x is the point in that cluster
+                    wss += distance.euclidean(cluster_centers[current_id], x[example,count,:])
 
                     #can make a graph for the dis later using wss
                 sse.append(wss)
-                if num_clusters>4:
-                    print(len(sse))
-                    print(num_clusters)         #this doesnt work either as then you are just the same sse for all
-                    wss_decrease_past = sse[num_clusters-3]/ sse[num_clusters-4]   #seeing if the decrease is still roughly at the same rate
-                    wss_decrease_current = sse[num_clusters-2]/sse[num_clusters-3]
-                        
+                if len(sse)>=3:     
+                    wss_decrease_past = sse[len(sse)-3]/ sse[len(sse)-2]
+                    wss_decrease_current = sse[len(sse)-2]/sse[len(sse)-1]
+                    print(wss_decrease_past)
+                    print(wss_decrease_current)    
                     if(wss_decrease_past>(wss_decrease_current*cut_off)):   
-                        k_best_wss = num_clusters-3          #issue point
-                        wss_setting = False                  #Stop condition
+                        k_best_wss = len(sse)             
+                        wss_setting = False                  #Stop condition 
+                        print(k_best_wss)
                         
             #Finding optimal k - Silhouette value
             if(silhouette_setting):
-                #the current label structure of cluster_ids_x wont match x 
                 sil.append(silhouette_score(x[example,:,:],cluster_ids_x,metric = 'euclidean'))
-                if(num_clusters>3):
-                    if(sil[num_clusters-3] > sil[num_clusters-2]):
+                if(len(sil)>3):
+                    if(sil[len(sil)-2] > sil[len(sil)-1]):
                         silhouette_setting = False           #Stop condition
-                        k_best_silhouette = sil[len(sil)-1]
-                         
+                        k_best_silhouette = sil.index(max(sil))+2
+                        print(k_best_silhouette)
+                        
+                        #grapho-matic 
+                        x_graph = []
+                        for k in range(2, len(sil)+2):
+                            x_graph.append(k)
+                        plt.plot(x_graph, sil)
+                        plt.xlabel('Cluster Number')
+                        plt.ylabel('Silhouette Score')
+                        plt.title('Silhouette Output')
+                        plt.show()
+        #grapho-matic 
+        x_graph = []
+        for k in range(2, len(sse)+2):
+            x_graph.append(k)
+        plt.plot(x_graph, sse)
+        plt.xlabel('Cluster Number')
+        plt.ylabel('WSS Score')
+        plt.title('Eblow Method Output')
+        plt.show()                    
         #Process for what k's to use and what not too
         if(len(sse) >= 1 and len(sil)>=1):
             wss_setting = True
             silhouette_setting = True
             if(k_best_wss == k_best_silhouette):
-                k_best.append(k_best_wss)
+                print("Same k - Results back each other")
+                k_best.append(k_best_silhouette)
             else:
-                if(choosen_learn == 'deep_learn'):      #need to record the two cluster ids in an array, do after the break condition
-                    accuracy_elbow, hps_elbow, metrics_elbow = deep_learn(x[example,:,:], cluster_ids_x, groups, classes, model, features, out_path)
-                    accuracy_silhouette,hps_silhouette, metrics_silhouette = deep_learn(x[example,:,:], cluster_ids_x, groups, classes, model, features, out_path)
-                else:
-                    accuracy_elbow, hps_elbow, metrics_elbow = machine_learn()
-                    accuracy_silhouette,hps_silhouette, metrics_silhouette = machine_learn()
-                
-                if(accuracy_elbow > accuracy_silhouette):
-                    k_best.append(k_best_wss)
-                else:
-                    k_best.append(k_best_silhouette)
+                print("K is not Same - Default to Silhoutte score")
+                k_best.append(k_best_silhouette)
         else:
             if(len(sse) >= 1):
                 wss_setting = True
@@ -830,23 +848,48 @@ def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_pat
         sil = []
         
     print(k_best)
-    print(sum(k_best))
-    print(len(k_best))
     k_value = round(sum(k_best)/len(k_best))    #finds best average k accross the datasets
     print("best k")
     print(k_value)
     
+    #Now that k has been found, we use this best k value to find the lables of all the values
+    new_x = old_x.reshape(x.shape[0]*x.shape[1],x.shape[2])
+    cluster_ids, centers = kmeans(new_x, num_clusters=k_value, distance='euclidean', device=torch.device('cuda:0'))
+    print(cluster_ids)
     
+    #Mean label calcualtion
+    label_mean = []
+    for y in range(x.shape[0]):
+        label_value = 0
+        for i in range(x.shape[1]):         #takes average lable of every 100 time points which attributes a lable to the timepoint label group
+           label_value += cluster_ids[i+(y*x.shape[1])].item()
+        label_mean.append(round(label_value/x.shape[1]))
+    
+    #Mode label calculation
+    label_mode = []    
+    cluster_ids = cluster_ids.numpy()
+    print(cluster_ids)
+    for y in range(x.shape[0]):
+        label_mode.append(mode(cluster_ids[(y*100):((y*100)+100)]))
+    print(label_mode)
 
+    #Mode or Mean - Also Makes it the Right Data Type
+    if Mode == True:
+        for y in range(len(y_train)):
+            y_train[y] = labels[y]
+        print(y_train)
+    else:
+        for y in range(len(y_train)):
+            y_train[y] = label_mean[y]
+        print(y_train)
+    
+    #Redoing the kmeans after the mode and mean have been done, as the labeling can change
+    cluster_ids, centers = kmeans(new_x, num_clusters=(max(y_train)+1), distance='euclidean', device=torch.device('cuda:0'))
+    
+    #Rememeber to mention that kmeans is calculated again after the mode and mean section, reason above
 
-
-    #cluster_ids_y = kmeans_predict(y[example,:,:], cluster_centers, 'euclidean', device=device)
-    
-    #x = torch.sparse.torch.eye(10).index_select(dim=0, index=x.long().flatten())
-    
-    
-    
-    
+        
+        
     
     #Graphing
     plt.figure(figsize=(4, 3), dpi=160)
@@ -867,5 +910,118 @@ def k_means(nirs,labels,groups, choosen_learn, classes, model, features, out_pat
     
     return cluster_ids_x, cluster_centers, cluster_ids_y #accuracies, all_hps, additional_metrics
 
-def pca():
+def TestingAgainstLabels(old_x, x, keep_y, y_train, l):
+        #kmeans labeling accuracy calculation
+    #accuracy, hps, metrics = deep_learn(keep_x, y_train, groups, classes, model, features, out_path='../results/')
+    #avg_accuracy = sum(accuracy)/len(accuracy)
+    #print(avg_accuracy)
+    
+    #Assigned labeling accuracy calculation
+    #accuracy, hps, metrics = deep_learn(keep_x, keep_y, groups, classes, model, features, out_path='../results/')
+    #avg_accuracy = sum(accuracy)/len(accuracy)
+    #print(avg_accuracy)
+    
+    #Distance calculation for kmeans labeling - mode of points
+    total_distance = []
+    for i in range(max(y_train)+1):
+        gap = 0
+        for y in range(len(y_train)):
+            if(y_train[y] == i):
+                for h in range(len(old_x[y])):
+                    gap += distance.euclidean(old_x[y,h,:], centers[i])
+        total_distance.append(gap)
+    distance_given = sum(total_distance)/len(total_distance)
+    print("distance for mode of points")
+    print(distance_given)
+    
+    #Distance calculation for kmeans labeling - individual
+    list_lables = []
+    for i in range(max(cluster_ids)+1):
+        holding = []
+        for y in range(cluster_ids.shape[0]):
+            if(cluster_ids[y] == i):
+                holding.append(y)               #keeps track of placement
+        list_lables.append(holding)  
+    
+    list_lables = np.array(list_lables)
+
+    flat_x = old_x.reshape(x.shape[0]*x.shape[1],x.shape[2])
+
+    total_distance = []
+    for i in range(max(cluster_ids)+1):
+        gap = 0
+        for y in range(len(list_lables[i])):
+            if(cluster_ids[y] == i):
+                list = np.array(list_lables[i])
+                gap += distance.euclidean(flat_x[list[y]], centers[i])
+        total_distance.append(gap)
+    distance_kmeans = sum(total_distance)/len(total_distance)
+    print("distance for mode of points")
+    print(distance_kmeans)
+
+
+    #You can graph the total distance to show how it preforms for the various lable groups
+    #then if it exists show how the graphs match each other at key locations, meaning that they both
+    #find the same groupings
+    
+    #Distance calculation for normal labeling
+    list_lables = []
+    print(keep_y)
+    for i in range(max(keep_y)+1):
+        holding = []
+        for y in range(keep_y.shape[0]):
+            if(keep_y[y] == i):
+                holding.append(y)               #keeps track of placement
+        list_lables.append(holding)     
+    
+    list_lables = np.array(list_lables)
+    clusters = []
+
+    for y in range(len(list_lables)):
+        holder = []
+        for i in range(len(list_lables[y])):
+            list = np.array(list_lables[y])
+            for h in range(len(old_x[list[i],:])):
+                holder.append(l[list[i],h,:])
+        holder = np.array(holder)
+        holder.flatten()
+        cluster = np.average(holder, axis=0)
+        clusters.append(cluster)
+
+    total_distance = []
+    for i in range(max(keep_y)+1):
+        gap = 0
+        for y in range(len(keep_y)):
+            if(keep_y[y] == i):
+                for h in range(len(old_x[y])):
+                    gap += distance.euclidean(old_x[y,h,:], clusters[i])
+        total_distance.append(gap)
+    distance_given = sum(total_distance)/len(total_distance)
+    print(distance_given)
+    
+    
+    
+    #Distance calculation, kmeans by cluster
+    clustered_id = []
+    for y in range(x.shape[0]):
+        clustered_id.append(np.average(x[y], axis=0))
+    
+    cluster_ids, centers = kmeans(torch.from_numpy(np.array(clustered_id)), num_clusters=(max(y_train)+1), distance='euclidean', device=torch.device('cuda:0'))
+    
+    print(centers)
+    
+    total_distance = []
+    for i in range(max(y_train)+1):
+        gap = 0
+        for y in range(len(y_train)):
+            if(y_train[y] == i):
+                for h in range(len(old_x[y])):
+                    gap += distance.euclidean(old_x[y,h,:], centers[i])
+        total_distance.append(gap)
+    distance_given = sum(total_distance)/len(total_distance)
+    print("distance for mode of points by kernel")
+    print(distance_given)
+    
+    #cluster_ids_y = kmeans_predict(y[example,:,:], cluster_centers, 'euclidean', device=device)
+    
     return 0
