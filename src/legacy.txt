@@ -1,0 +1,80 @@
+legacy
+
+#nsamples, nx, ny = x.shape
+            #print(x[0,:,:])
+            #kmeans_test = KMeans(n_clusters=num_clusters, random_state=0).fit(x[example,:,:])
+            #print(kmeans_test.labels_)
+
+
+
+#need this later 
+cluster_ids_y = kmeans_predict(y[example,:,:], cluster_centers, 'euclidean', device=device)
+
+
+#kmeans_bit = KMeans(n_clusters=num_clusters, random_state=0).fit(x[example,:,:])
+            cluster_ids_x, cluster_centers = kmeans(x[example,:,:], num_clusters=num_clusters, distance='euclidean', device=torch.device('cuda:0'))
+            #cluster_ids_x = kmeans_bit.labels_ = list(kmeans_bit.labels_)
+            #cluster_centers = kmeans_bit.cluster_centers_ = list(kmeans_bit.cluster_centers_)
+
+#y = y.reshape(y.shape[0]*y.shape[1]*y.shape[2])
+
+
+
+                if(choosen_learn == 'deep_learn'):      #need to record the two cluster ids in an array, do after the break condition
+                    accuracy_elbow, hps_elbow, metrics_elbow = deep_learn(nirs[example,:,:], cluster_ids_x, groups, classes, model, features, out_path)
+                    accuracy_silhouette,hps_silhouette, metrics_silhouette = deep_learn(nirs[example,:,:], cluster_ids_x, groups, classes, model, features, out_path)
+                    
+                    
+                else:
+                    accuracy_elbow, hps_elbow, metrics_elbow = machine_learn()
+                    accuracy_silhouette,hps_silhouette, metrics_silhouette = machine_learn()
+
+                    
+    list_lables = []
+    for i in range(max(y_train)+1):
+        holding = []
+        for y in range(cluster_ids.shape[0]):
+            if(cluster_ids[y] == i):
+                holding.append(y)               #keeps track of placement
+        list_lables.append(holding)  
+    
+    list_lables = np.array(list_lables)
+
+    flat_x = x.reshape(x.shape[0]*x.shape[1],x.shape[2])
+    print(x)
+    print(flat_x)
+    total_distance = []
+    for i in range(max(cluster_ids)+1):
+        gap = 0
+        for y in range(len(list_lables[i])):
+            if(cluster_ids[y] == i):
+                list = np.array(list_lables[i])
+                gap += distance.euclidean(flat_x[list[y]], centers[i])
+        total_distance.append(gap)
+    distance_kmeans = sum(total_distance)/len(total_distance)
+    print(distance_kmeans)
+
+
+
+
+    #Graphing
+    plt.figure(figsize=(4, 3), dpi=160)
+    plt.scatter(x[:, 0], x[:, 1], c=cluster_ids_x, cmap='cool')
+    plt.scatter(y[:, 0], y[:, 1], c=cluster_ids_y, cmap='cool', marker='X')
+    
+    
+    plt.scatter(
+        cluster_centers[:, 0], cluster_centers[:, 1],
+        c='white',
+        alpha=0.6,
+        edgecolors='black',
+        linewidths=2
+    )
+    plt.axis([-0.1, 0.1, -0.1, 0.1])
+    plt.tight_layout()
+    plt.show()
+
+
+     i = 0
+    for i in range(swap.shape[0]):
+        swap[i,:] = x[(i*swap.shape[1]):((i*swap.shape[1])+swap.shape[1])]  #recreating it to be in the oringal configuration

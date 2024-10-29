@@ -1,0 +1,34 @@
+minibatch unneccessary due to the data size not exceededing 10k
+
+
+Now - Code for Friday, remember to do the aims post for the meeting
+Friday after meeting - do Internships
+Weekend - Amoung also coding, do catch up for stuff missed, including sec lab, just review and understand the concepts
+
+
+
+probably mention who you used methods to check the accuracy versus generalisation, talk about cross fold validaiton
+	This can be done in an and statement within a for loop
+	-One method would be to run the validation set and in the change is too great then its over fitted
+
+
+idea, show all the sillhoutte graphs on the same graph , to show the range of displays
+
+
+see the variability between his model and mine, can basically use wss I have already in the algorithm, look at
+other variance functions aswell
+
+average the cluster, and try grouping
+
+can tell that obviously going by individual data point cluster group classifcations the kmeans method proves superior
+
+do the same mode method on the data and then run it through the kmeans algorithm to produce anohter discussion point, eg: lable by cluster
+rather then group
+
+when making a point using the data collected, try to find another source that would co-oberate that same conclusion to give greater validity to it
+
+have to go through the code later and make it cleaner, eg: variable names, have to also make the code run by the input point of the ANN model that I
+orginally made, so you put in all the parameters and it just works
+	-might also be useful to split up the code into separate functions
+	-add comments explaining what each part does - try to make it look like the other comments on the code for cleanliness 
+
